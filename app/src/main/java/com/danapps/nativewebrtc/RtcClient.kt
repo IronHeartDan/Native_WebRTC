@@ -9,9 +9,14 @@ class RtcClient(application: Application, observer: PeerConnection.Observer) {
 
 
     companion object {
-        private const val LOCAL_TRACK_ID = "local_track"
-        private const val LOCAL_STREAM_ID = "local_track"
+        private const val VIDEO_TRACK_ID = "video_track"
+        private const val AUDIO_TRACK_ID = "audio_track"
+        private const val STREAM_ID = "local_track"
     }
+
+    private lateinit var localStream: MediaStream
+    private lateinit var audioTrack: AudioTrack
+    private lateinit var videoTrack: VideoTrack
 
 
     init {
@@ -22,7 +27,9 @@ class RtcClient(application: Application, observer: PeerConnection.Observer) {
 
     private val iceServer = listOf(
         PeerConnection.IceServer.builder("stun:stun.l.google.com:19302")
-            .createIceServer()
+            .createIceServer(),
+        PeerConnection.IceServer.builder("turn:numb.viagenie.ca").setUsername("webrtc@live.com")
+            .setPassword("muazkh").createIceServer()
     )
 
     private val peerConnectionFactory by lazy { buildPeerConnectionFactory() }
@@ -92,18 +99,48 @@ class RtcClient(application: Application, observer: PeerConnection.Observer) {
     fun setLocalStream(localVideoOutput: SurfaceViewRenderer) {
         val surfaceTextureHelper =
             SurfaceTextureHelper.create(Thread.currentThread().name, rootEglBase.eglBaseContext)
+
         (cameraVideoCapturer as VideoCapturer).initialize(
             surfaceTextureHelper,
             localVideoOutput.context,
             localVideoSource.capturerObserver
         )
-        cameraVideoCapturer.startCapture(320, 240, 60)
-        val localVideoTrack =
-            peerConnectionFactory.createVideoTrack(LOCAL_TRACK_ID, localVideoSource)
-        localVideoTrack.addSink(localVideoOutput)
-        val localStream = peerConnectionFactory.createLocalMediaStream(LOCAL_STREAM_ID)
-        localStream.addTrack(localVideoTrack)
+        cameraVideoCapturer.startCapture(1024, 720, 60)
+
+        videoTrack =
+            peerConnectionFactory.createVideoTrack(VIDEO_TRACK_ID, localVideoSource)
+        videoTrack.addSink(localVideoOutput)
+
+
+        audioTrack = peerConnectionFactory.createAudioTrack(
+            AUDIO_TRACK_ID,
+            peerConnectionFactory.createAudioSource(MediaConstraints())
+        )
+
+
+        localStream = peerConnectionFactory.createLocalMediaStream(STREAM_ID)
+
+        localStream.addTrack(videoTrack)
+        localStream.addTrack(audioTrack)
+
         peerConnection?.addStream(localStream)
+    }
+
+    fun removeVideo(localVideoOutput: SurfaceViewRenderer) {
+        localStream.removeTrack(videoTrack)
+        localVideoOutput.release()
+    }
+
+    fun addVideo(localVideoOutput: SurfaceViewRenderer) {
+        localStream.addTrack(videoTrack)
+    }
+
+    fun removeAudio() {
+        localStream.removeTrack(audioTrack)
+    }
+
+    fun addAudio() {
+        localStream.removeTrack(audioTrack)
     }
 
     //Add Ice Candidate
@@ -127,22 +164,22 @@ class RtcClient(application: Application, observer: PeerConnection.Observer) {
 
                     override fun onSetSuccess() {
                         Log.d("MyApplication", "onSetSuccess: Local")
+                        sdpObserver.onCreateSuccess(desc)
                     }
 
                     override fun onCreateSuccess(p0: SessionDescription?) {
-                        Log.d("MyApplication", "onCreateSuccess: $p0")
+                        Log.d("MyApplication", "Bla Bla Bla onCreateSuccess: $p0")
                     }
 
                     override fun onCreateFailure(p0: String?) {
                     }
                 }, desc)
-                sdpObserver.onCreateSuccess(desc)
             }
         }, constraints)
     }
 
     private fun PeerConnection.answer(sdpObserver: SdpObserver) {
-        Log.d("MyApplication", "answer: ")
+        Log.d("MyApplication", "Local Generating answer: ")
         val constraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
         }
@@ -155,17 +192,17 @@ class RtcClient(application: Application, observer: PeerConnection.Observer) {
                     }
 
                     override fun onSetSuccess() {
-                        Log.d("MyApplication", "onSetSuccess: Answer Local D")
+                        Log.d("MyApplication", "onSetSuccess: Answer Local Set")
+                        sdpObserver.onCreateSuccess(p0)
                     }
 
                     override fun onCreateSuccess(p0: SessionDescription?) {
+                        Log.d("MyApplication", "Local onCreateSuccess: Answer")
                     }
 
                     override fun onCreateFailure(p0: String?) {
                     }
                 }, p0)
-                Log.d("MyApplication", "onCreateSuccess: In Client $p0")
-                sdpObserver.onCreateSuccess(p0)
             }
 
             override fun onCreateFailure(p0: String?) {
@@ -174,19 +211,26 @@ class RtcClient(application: Application, observer: PeerConnection.Observer) {
         }, constraints)
     }
 
+    private fun PeerConnection.end() {
+
+    }
+
 
     fun call(sdpObserver: SdpObserver) = peerConnection?.call(sdpObserver)
     fun answer(sdpObserver: SdpObserver) = peerConnection?.answer(sdpObserver)
+    fun end() = peerConnection?.end()
+    fun close() = peerConnection?.close()
 
 
-    fun onRemoteSessionReceived(sessionDescription: SessionDescription) {
+    fun onRemoteSessionReceived(sessionDescription: SessionDescription, sdpObserver: SdpObserver?) {
         peerConnection?.setRemoteDescription(object : SdpObserver {
             override fun onSetFailure(p0: String?) {
                 Log.d("MyApplication", "onSetFailure: $p0")
             }
 
             override fun onSetSuccess() {
-                Log.d("MyApplication", "onSetSuccess: ")
+                Log.d("MyApplication", "Remote onSetSuccess: ")
+                sdpObserver?.onSetSuccess()
             }
 
             override fun onCreateSuccess(p0: SessionDescription?) {
